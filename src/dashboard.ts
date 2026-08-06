@@ -75,8 +75,19 @@ tr:last-child td{border-bottom:none}
 .stale{color:var(--mute)}
 .empty{padding:50px 20px;text-align:center;color:var(--mute)}
 .empty .disp{font-family:var(--disp);font-weight:800;font-size:22px;color:var(--paper);margin-bottom:8px}
-.groupbars{padding:6px 0}
-.gb{display:flex;align-items:center;gap:10px;padding:8px 18px}
+.lb-row{display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.lb-row:last-child{border-bottom:none}
+.lb-rank{font-family:var(--disp);font-weight:800;font-size:20px;width:34px;text-align:center;color:var(--mute);flex-shrink:0}
+.lb-row.top1 .lb-rank{color:#F5C518} .lb-row.top2 .lb-rank{color:#C0C6CE} .lb-row.top3 .lb-rank{color:#CD7F32}
+.lb-name{flex:1;min-width:0}
+.lb-name b{font-weight:700;font-size:14px}
+.lb-name span{font-family:var(--mono);font-size:10px;color:var(--mute);display:block}
+.lb-break{display:flex;gap:8px;font-family:var(--mono);font-size:10px;color:var(--mute);flex-shrink:0}
+.lb-break i{font-style:normal}
+.lb-break .b1{color:var(--red)} .lb-break .b2{color:var(--amber)} .lb-break .b3{color:var(--green)} .lb-break .b4{color:var(--mute)}
+.lb-score{font-family:var(--disp);font-weight:800;font-size:24px;color:var(--green);min-width:54px;text-align:right;flex-shrink:0}
+.tbl-score{font-family:var(--mono);font-weight:700;color:var(--green)}
+.groupbars{padding:6px 0}.gb{display:flex;align-items:center;gap:10px;padding:8px 18px}
 .gb .gname{flex:1;font-size:13px}
 .gb .gcount{font-family:var(--mono);font-size:11px;color:var(--mute)}
 .gb .gfail{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);min-width:30px;text-align:right}
@@ -102,6 +113,11 @@ tr:last-child td{border-bottom:none}
 
   <div class="tiles" id="tiles"></div>
 
+  <div class="card" id="lbCard" style="margin-bottom:22px">
+    <h2>Leaderboard <span class="n">weighted · S1×10 S2×5 S3×2 S4×1 · pass×1</span></h2>
+    <div id="leaderboard"><div class="empty" style="padding:30px">No scores yet.</div></div>
+  </div>
+
   <div class="cols">
     <div class="card">
       <h2>Failures &amp; blocks <span class="n" id="failN">0</span></h2>
@@ -110,7 +126,7 @@ tr:last-child td{border-bottom:none}
     <div>
       <div class="card" style="margin-bottom:22px">
         <h2>Testers <span class="n" id="testerN">0</span></h2>
-        <div style="max-height:420px;overflow-y:auto"><table id="testerTbl"><thead><tr><th>Tester</th><th>Progress</th><th>P / F / B</th><th>Last</th></tr></thead><tbody></tbody></table></div>
+        <div style="max-height:420px;overflow-y:auto"><table id="testerTbl"><thead><tr><th>Tester</th><th>Progress</th><th>P / F / B</th><th>Score</th><th>Last</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="card">
         <h2>By area</h2>
@@ -206,9 +222,22 @@ function render(d){
       <td><div class="tester-name">\${esc(u.tester_name)}</div><div class="tester-sub">\${esc(u.tag)} · \${esc(u.role)} · \${esc(u.device)}\${u.wave?' · W'+esc(u.wave):''}</div></td>
       <td><span class="prog"><i style="width:\${pct}%"></i></span><span class="tester-sub">\${u.logged}</span></td>
       <td><span class="mini"><span class="p">\${u.pass}</span><span class="f">\${u.fail}</span><span class="b">\${u.blocked}</span></span></td>
+      <td class="tbl-score">\${u.score||0}</td>
       <td class="\${stale.endsWith('h')?'stale':''}">\${stale}</td>
     </tr>\`;
-  }).join('') || '<tr><td colspan="4" class="stale" style="padding:24px;text-align:center">No testers yet</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="stale" style="padding:24px;text-align:center">No testers yet</td></tr>';
+
+  // leaderboard — same data, already sorted by score DESC from the server
+  const ranked = (d.byTester||[]).filter(u=>(u.score||0)>0);
+  q('#leaderboard').innerHTML = ranked.length ? ranked.map((u,i)=>{
+    const rank=i+1; const topCls = rank<=3 ? ' top'+rank : '';
+    return \`<div class="lb-row\${topCls}">
+      <span class="lb-rank">\${rank}</span>
+      <div class="lb-name"><b>\${esc(u.tester_name)}</b><span>\${esc(u.tag)} · \${esc(u.device)}\${u.wave?' · W'+esc(u.wave):''}</span></div>
+      <div class="lb-break"><i class="b1">\${u.fail} fails</i><i>·</i><i class="b3">\${u.pass} pass</i></div>
+      <span class="lb-score">\${u.score}</span>
+    </div>\`;
+  }).join('') : '<div class="empty" style="padding:30px">No scores yet — results appear as testers log fails and passes.</div>';
 
   // group bars
   const groups = d.byGroup||[];

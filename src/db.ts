@@ -111,10 +111,18 @@ export async function summary() {
             COUNT(*) FILTER (WHERE verdict='pass')::int  AS pass,
             COUNT(*) FILTER (WHERE verdict='fail')::int  AS fail,
             COUNT(*) FILTER (WHERE verdict='block')::int AS blocked,
+            (
+              COUNT(*) FILTER (WHERE verdict='fail' AND severity='S1') * 10 +
+              COUNT(*) FILTER (WHERE verdict='fail' AND severity='S2') * 5 +
+              COUNT(*) FILTER (WHERE verdict='fail' AND severity='S3') * 2 +
+              COUNT(*) FILTER (WHERE verdict='fail' AND severity='S4') * 1 +
+              COUNT(*) FILTER (WHERE verdict='fail' AND severity IS NULL) * 2 +
+              COUNT(*) FILTER (WHERE verdict='pass') * 1
+            )::int AS score,
             MAX(received_at) AS last_seen
        FROM results
       GROUP BY tester_name, tag, device, role, wave
-      ORDER BY fail DESC, logged DESC`,
+      ORDER BY score DESC, fail DESC, logged DESC`,
   );
   const failures = await pool.query(
     `SELECT tester_name, tag, device, test_id, test_text, severity, recording, notes, received_at
