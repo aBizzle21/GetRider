@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import {
-  initSchema, upsertResult, allResults, summary, IncomingResult,
+  initSchema, upsertResult, allResults, summary, clearAllResults, IncomingResult,
 } from './db';
 import { DASHBOARD_HTML } from './dashboard';
 
@@ -79,6 +79,14 @@ class AppController {
   async apiSummary(@Query('token') token: string) {
     checkToken(token);
     return await summary();
+  }
+
+  // ---- reset: wipe every result (server only; testers' local copies untouched) ----
+  @Post('/admin/reset')
+  async reset(@Query('token') token: string) {
+    checkToken(token);
+    const removed = await clearAllResults();
+    return { ok: true, cleared: removed };
   }
 
   // ---- exports for the India team ----

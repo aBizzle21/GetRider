@@ -27,6 +27,8 @@ header{display:flex;align-items:center;justify-content:space-between;gap:16px;fl
 .btn:hover{border-color:var(--green)}
 .btn svg{width:13px;height:13px}
 .btn.g{background:var(--green);color:var(--ink);border-color:var(--green)}
+.btn.danger{color:var(--red);border-color:rgba(255,90,77,.35)}
+.btn.danger:hover{border-color:var(--red);background:rgba(255,90,77,.08)}
 
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
 .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
@@ -92,6 +94,7 @@ tr:last-child td{border-bottom:none}
       <span class="live"><span class="dot"></span><span id="liveT">connecting…</span></span>
       <a class="btn" id="csvBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>CSV</a>
       <a class="btn" id="jsonBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 1 2 2 2 2 0 0 1-2 2v5a2 2 0 0 1-2 2h-1"/></svg>JSON</a>
+      <button class="btn danger" id="resetBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>Clear all</button>
     </div>
   </header>
 
@@ -126,6 +129,20 @@ function esc(x){ return (x==null?'':String(x)).replace(/[&<>"]/g,c=>({'&':'&amp;
 
 q('#csvBtn').href = '/export.csv?token='+encodeURIComponent(TOKEN);
 q('#jsonBtn').href = '/export.json?token='+encodeURIComponent(TOKEN);
+
+q('#resetBtn').addEventListener('click', async () => {
+  const n = q('#tiles') ? (document.querySelector('.tile .big') ? document.querySelector('.tile .big').textContent : '') : '';
+  if(!confirm('Clear ALL results from the dashboard?\\n\\nThis wipes every tester\\'s results from the server and cannot be undone. Testers\\' own copies on their computers are not affected.\\n\\nUse this to reset before a fresh test run.')) return;
+  if(!confirm('Last check — really delete everything on the server now?')) return;
+  try{
+    const r = await fetch('/admin/reset?token='+encodeURIComponent(TOKEN), {method:'POST'});
+    if(r.status===401){ alert('Wrong token — reset not allowed.'); return; }
+    if(!r.ok){ alert('Reset failed: server error '+r.status); return; }
+    const j = await r.json();
+    poll();
+    alert('Cleared '+(j.cleared??0)+' result(s). Dashboard is reset.');
+  }catch(e){ alert('Reset failed — could not reach the server.'); }
+});
 
 async function poll(){
   try{

@@ -91,6 +91,11 @@ export async function allResults() {
   return rows;
 }
 
+export async function clearAllResults(): Promise<number> {
+  const { rowCount } = await pool.query('DELETE FROM results');
+  return rowCount || 0;
+}
+
 export async function summary() {
   const totals = await pool.query(
     `SELECT verdict, COUNT(*)::int AS n FROM results GROUP BY verdict`,
