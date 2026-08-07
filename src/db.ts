@@ -24,6 +24,7 @@ export async function initSchema() {
       group_name    TEXT NOT NULL,
       test_id       TEXT NOT NULL,
       test_text     TEXT NOT NULL,
+      pass_condition TEXT,
       verdict       TEXT NOT NULL,
       severity      TEXT,
       recording     BOOLEAN NOT NULL DEFAULT FALSE,
@@ -36,6 +37,9 @@ export async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_results_tag ON results (tag);
     CREATE INDEX IF NOT EXISTS idx_results_testerkey ON results (tester_key);
   `);
+  // Self-heal: if the table pre-dates the pass_condition column, add it.
+  // Harmless on fresh databases where CREATE TABLE already included it.
+  await pool.query(`ALTER TABLE results ADD COLUMN IF NOT EXISTS pass_condition TEXT`);
 }
 
 export interface IncomingResult {
@@ -48,6 +52,7 @@ export interface IncomingResult {
   group: string;
   test_id: string;
   test: string;
+  pass_condition?: string;
   verdict: string;
   severity?: string;
   recording?: boolean;
@@ -59,8 +64,8 @@ export async function upsertResult(r: IncomingResult) {
   await pool.query(
     `INSERT INTO results
        (tester_key, tester_name, tag, device, role, wave, group_name,
-        test_id, test_text, verdict, severity, recording, notes, logged_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        test_id, test_text, pass_condition, verdict, severity, recording, notes, logged_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      ON CONFLICT (tester_key, test_id) DO UPDATE SET
        tester_name = EXCLUDED.tester_name,
        tag         = EXCLUDED.tag,
@@ -75,7 +80,7 @@ export async function upsertResult(r: IncomingResult) {
        received_at = NOW()`,
     [
       r.tester_key, r.tester, r.tag, r.device, r.role, r.wave || null, r.group,
-      r.test_id, r.test, r.verdict, r.severity || null, !!r.recording,
+      r.test_id, r.test, r.pass_condition || null, r.verdict, r.severity || null, !!r.recording,
       r.notes || null, r.logged_at ? new Date(r.logged_at) : null,
     ],
   );
@@ -83,7 +88,7 @@ export async function upsertResult(r: IncomingResult) {
 
 export async function allResults() {
   const { rows } = await pool.query(
-    `SELECT tester_name, tag, device, role, wave, group_name, test_id, test_text,
+    `SELECT tester_name, tag, device, role, wave, group_name, test_id, test_text, pass_condition,
             verdict, severity, recording, notes, logged_at, received_at
        FROM results
       ORDER BY tag, tester_name, group_name, test_id`,
@@ -96,6 +101,21 @@ export async function clearAllResults(): Promise<number> {
   return rowCount || 0;
 }
 
+export async function testerResults(testerKey: string) {
+  const { rows } = await pool.query(
+    `SELECT group_name, test_id, test_text, pass_condition, verdict, severity,
+            recording, notes, logged_at, received_at
+       FROM results
+      WHERE tester_key = $1
+      ORDER BY
+        CASE verdict WHEN 'fail' THEN 1 WHEN 'block' THEN 2 WHEN 'pass' THEN 3 ELSE 4 END,
+        CASE severity WHEN 'S1' THEN 1 WHEN 'S2' THEN 2 WHEN 'S3' THEN 3 WHEN 'S4' THEN 4 ELSE 5 END,
+        received_at DESC`,
+    [testerKey],
+  );
+  return rows;
+}
+
 export async function summary() {
   const totals = await pool.query(
     `SELECT verdict, COUNT(*)::int AS n FROM results GROUP BY verdict`,
@@ -106,7 +126,7 @@ export async function summary() {
       GROUP BY severity ORDER BY severity`,
   );
   const byTester = await pool.query(
-    `SELECT tester_name, tag, device, role, wave,
+    `SELECT tester_key, tester_name, tag, device, role, wave,
             COUNT(*)::int AS logged,
             COUNT(*) FILTER (WHERE verdict='pass')::int  AS pass,
             COUNT(*) FILTER (WHERE verdict='fail')::int  AS fail,
@@ -121,7 +141,7 @@ export async function summary() {
             )::int AS score,
             MAX(received_at) AS last_seen
        FROM results
-      GROUP BY tester_name, tag, device, role, wave
+      GROUP BY tester_key, tester_name, tag, device, role, wave
       ORDER BY score DESC, fail DESC, logged DESC`,
   );
   const failures = await pool.query(

@@ -87,6 +87,36 @@ tr:last-child td{border-bottom:none}
 .lb-break .b1{color:var(--red)} .lb-break .b2{color:var(--amber)} .lb-break .b3{color:var(--green)} .lb-break .b4{color:var(--mute)}
 .lb-score{font-family:var(--disp);font-weight:800;font-size:24px;color:var(--green);min-width:54px;text-align:right;flex-shrink:0}
 .tbl-score{font-family:var(--mono);font-weight:700;color:var(--green)}
+/* clickable rows */
+.lb-row{cursor:pointer;transition:background .12s}
+.lb-row:hover{background:rgba(255,255,255,.03)}
+#testerTbl tbody tr{cursor:pointer;transition:background .12s}
+#testerTbl tbody tr:hover{background:rgba(255,255,255,.03)}
+/* detail drawer */
+.drawer-scrim{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:none}
+.drawer-scrim.on{display:block}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(560px,92vw);background:var(--panel);border-left:1px solid var(--line);box-shadow:-20px 0 60px rgba(0,0,0,.4);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .26s ease}
+.drawer-scrim.on .drawer{transform:translateX(0)}
+.drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:22px 22px 16px;border-bottom:1px solid var(--line)}
+.drawer-head h2{font-family:var(--disp);font-weight:800;font-size:22px;letter-spacing:-.01em}
+.drawer-x{width:34px;height:34px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.drawer-x:hover{color:var(--paper)}
+.drawer-score{padding:14px 22px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--mute);display:flex;gap:16px;flex-wrap:wrap}
+.drawer-score b{font-family:var(--disp);font-size:20px;color:var(--green)}
+.drawer-body{flex:1;overflow-y:auto;padding:8px 0}
+.dr-item{padding:13px 22px;border-bottom:1px solid var(--line)}
+.dr-top{display:flex;align-items:center;gap:9px;margin-bottom:4px;flex-wrap:wrap}
+.dr-vtag{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.05em;padding:3px 7px;border-radius:5px}
+.dr-vtag.fail{color:var(--red);background:rgba(255,90,77,.14)}
+.dr-vtag.block{color:var(--amber);background:rgba(245,179,1,.14)}
+.dr-vtag.pass{color:var(--green);background:rgba(31,191,82,.12)}
+.dr-id{font-family:var(--mono);font-size:10px;color:var(--mute)}
+.dr-grp{font-family:var(--mono);font-size:9.5px;color:var(--mute);margin-left:auto}
+.dr-test{font-weight:600;font-size:13.5px;margin-bottom:3px;line-height:1.4}
+.dr-pass{font-size:11.5px;color:var(--mute);line-height:1.45;margin-bottom:5px}
+.dr-pass b{color:var(--green)}
+.dr-note{font-size:12.5px;color:#C4CEC5;background:var(--panel2);border-radius:7px;padding:8px 10px;line-height:1.45;margin-top:5px}
+.dr-rec{font-family:var(--mono);font-size:9.5px;color:var(--blue)}
 .groupbars{padding:6px 0}.gb{display:flex;align-items:center;gap:10px;padding:8px 18px}
 .gb .gname{flex:1;font-size:13px}
 .gb .gcount{font-family:var(--mono);font-size:11px;color:var(--mute)}
@@ -133,6 +163,18 @@ tr:last-child td{border-bottom:none}
         <div class="groupbars" id="groupBars"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- per-tester detail drawer -->
+<div class="drawer-scrim" id="drawerScrim">
+  <div class="drawer" id="drawer">
+    <div class="drawer-head">
+      <div><h2 id="dName">Tester</h2><span id="dSub" class="tester-sub"></span></div>
+      <button class="drawer-x" id="drawerX"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="drawer-score" id="dScore"></div>
+    <div class="drawer-body" id="dBody"></div>
   </div>
 </div>
 
@@ -213,12 +255,13 @@ function render(d){
 
   // testers
   const testers = d.byTester||[];
+  indexTesters(testers);
   q('#testerN').textContent = testers.length;
   const TOTAL = 96; // approx count of break-it tests; progress bar is indicative
   q('#testerTbl').querySelector('tbody').innerHTML = testers.map(u=>{
     const pct = Math.min(100, Math.round(u.logged/TOTAL*100));
     const stale = fmtAgo(u.last_seen);
-    return \`<tr>
+    return \`<tr data-key="\${esc(u.tester_key)}">
       <td><div class="tester-name">\${esc(u.tester_name)}</div><div class="tester-sub">\${esc(u.tag)} · \${esc(u.role)} · \${esc(u.device)}\${u.wave?' · W'+esc(u.wave):''}</div></td>
       <td><span class="prog"><i style="width:\${pct}%"></i></span><span class="tester-sub">\${u.logged}</span></td>
       <td><span class="mini"><span class="p">\${u.pass}</span><span class="f">\${u.fail}</span><span class="b">\${u.blocked}</span></span></td>
@@ -231,7 +274,7 @@ function render(d){
   const ranked = (d.byTester||[]).filter(u=>(u.score||0)>0);
   q('#leaderboard').innerHTML = ranked.length ? ranked.map((u,i)=>{
     const rank=i+1; const topCls = rank<=3 ? ' top'+rank : '';
-    return \`<div class="lb-row\${topCls}">
+    return \`<div class="lb-row\${topCls}" data-key="\${esc(u.tester_key)}">
       <span class="lb-rank">\${rank}</span>
       <div class="lb-name"><b>\${esc(u.tester_name)}</b><span>\${esc(u.tag)} · \${esc(u.device)}\${u.wave?' · W'+esc(u.wave):''}</span></div>
       <div class="lb-break"><i class="b1">\${u.fail} fails</i><i>·</i><i class="b3">\${u.pass} pass</i></div>
@@ -249,6 +292,56 @@ function render(d){
 
 poll();
 setInterval(poll, 4000);
+
+// ---- per-tester drill-down ----
+let TESTER_INDEX = {}; // tester_key -> summary row (updated each poll)
+function indexTesters(list){ TESTER_INDEX = {}; (list||[]).forEach(u=>{ TESTER_INDEX[u.tester_key]=u; }); }
+
+document.addEventListener('click', (e) => {
+  const row = e.target.closest('[data-key]');
+  if(!row) return;
+  const key = row.getAttribute('data-key');
+  if(key) openTester(key);
+});
+q('#drawerX').addEventListener('click', closeDrawer);
+q('#drawerScrim').addEventListener('click', (e)=>{ if(e.target===q('#drawerScrim')) closeDrawer(); });
+document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeDrawer(); });
+
+function closeDrawer(){ q('#drawerScrim').classList.remove('on'); }
+
+async function openTester(key){
+  const u = TESTER_INDEX[key];
+  q('#dName').textContent = u ? u.tester_name : 'Tester';
+  q('#dSub').textContent = u ? (u.tag+' · '+u.role+' · '+u.device+(u.wave?' · Wave '+u.wave:'')) : '';
+  q('#dScore').innerHTML = u ? \`<span><b>\${u.score||0}</b> score</span><span>\${u.logged} logged</span><span style="color:var(--green)">\${u.pass} pass</span><span style="color:var(--red)">\${u.fail} fail</span><span style="color:var(--amber)">\${u.blocked} blocked</span>\` : '';
+  q('#dBody').innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+  q('#drawerScrim').classList.add('on');
+  try{
+    const r = await fetch('/api/tester?token='+encodeURIComponent(TOKEN)+'&key='+encodeURIComponent(key));
+    if(!r.ok){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">Couldn\\'t load this tester.</div>'; return; }
+    const rows = await r.json();
+    renderTesterBody(rows);
+  }catch(e){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">Couldn\\'t load this tester.</div>'; }
+}
+
+function renderTesterBody(rows){
+  if(!rows || !rows.length){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">No results logged yet.</div>'; return; }
+  q('#dBody').innerHTML = rows.map(r=>{
+    const v = r.verdict;
+    const vlabel = v==='fail' ? ('FAIL'+(r.severity?' · '+r.severity:'')) : v==='block' ? 'BLOCKED' : 'PASS';
+    return \`<div class="dr-item">
+      <div class="dr-top">
+        <span class="dr-vtag \${v}">\${vlabel}</span>
+        <span class="dr-id">\${esc(r.test_id)}</span>
+        \${r.recording?'<span class="dr-rec">● REC</span>':''}
+        <span class="dr-grp">\${esc(r.group_name)}</span>
+      </div>
+      <div class="dr-test">\${esc(r.test_text)}</div>
+      \${r.pass_condition?\`<div class="dr-pass"><b>Pass if:</b> \${esc(r.pass_condition)}</div>\`:''}
+      \${r.notes?\`<div class="dr-note">\${esc(r.notes)}</div>\`:''}
+    </div>\`;
+  }).join('');
+}
 </script>
 </body>
 </html>`;

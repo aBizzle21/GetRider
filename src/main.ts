@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import {
-  initSchema, upsertResult, allResults, summary, clearAllResults, IncomingResult,
+  initSchema, upsertResult, allResults, summary, clearAllResults, testerResults, IncomingResult,
 } from './db';
 import { DASHBOARD_HTML } from './dashboard';
 
@@ -21,7 +21,7 @@ function checkToken(provided?: string) {
 
 function toCsv(rows: any[]): string {
   const cols = [
-    'tester_name','tag','device','role','wave','group_name','test_id','test_text',
+    'tester_name','tag','device','role','wave','group_name','test_id','test_text','pass_condition',
     'verdict','severity','recording','notes','logged_at','received_at',
   ];
   const cell = (v: any) => {
@@ -79,6 +79,14 @@ class AppController {
   async apiSummary(@Query('token') token: string) {
     checkToken(token);
     return await summary();
+  }
+
+  // ---- one tester's full log (dashboard drill-down) ----
+  @Get('/api/tester')
+  async apiTester(@Query('token') token: string, @Query('key') key: string) {
+    checkToken(token);
+    if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
+    return await testerResults(key);
   }
 
   // ---- reset: wipe every result (server only; testers' local copies untouched) ----
