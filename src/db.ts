@@ -101,6 +101,11 @@ export async function clearAllResults(): Promise<number> {
   return rowCount || 0;
 }
 
+export async function clearTester(testerKey: string): Promise<number> {
+  const { rowCount } = await pool.query('DELETE FROM results WHERE tester_key = $1', [testerKey]);
+  return rowCount || 0;
+}
+
 export async function testerResults(testerKey: string) {
   const { rows } = await pool.query(
     `SELECT group_name, test_id, test_text, pass_condition, verdict, severity,

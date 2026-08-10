@@ -101,6 +101,8 @@ tr:last-child td{border-bottom:none}
 .drawer-head h2{font-family:var(--disp);font-weight:800;font-size:22px;letter-spacing:-.01em}
 .drawer-x{width:34px;height:34px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
 .drawer-x:hover{color:var(--paper)}
+.drawer-del{width:34px;height:34px;border-radius:9px;background:var(--panel2);border:1px solid rgba(255,90,77,.35);color:var(--red);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.drawer-del:hover{background:rgba(255,90,77,.1);border-color:var(--red)}
 .drawer-score{padding:14px 22px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--mute);display:flex;gap:16px;flex-wrap:wrap}
 .drawer-score b{font-family:var(--disp);font-size:20px;color:var(--green)}
 .drawer-body{flex:1;overflow-y:auto;padding:8px 0}
@@ -171,7 +173,10 @@ tr:last-child td{border-bottom:none}
   <div class="drawer" id="drawer">
     <div class="drawer-head">
       <div><h2 id="dName">Tester</h2><span id="dSub" class="tester-sub"></span></div>
-      <button class="drawer-x" id="drawerX"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <button class="drawer-del" id="drawerDel" title="Delete this tester's results"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+        <button class="drawer-x" id="drawerX"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
     </div>
     <div class="drawer-score" id="dScore"></div>
     <div class="drawer-body" id="dBody"></div>
@@ -307,9 +312,27 @@ q('#drawerX').addEventListener('click', closeDrawer);
 q('#drawerScrim').addEventListener('click', (e)=>{ if(e.target===q('#drawerScrim')) closeDrawer(); });
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeDrawer(); });
 
+let CURRENT_TESTER = null;
+q('#drawerDel').addEventListener('click', async () => {
+  if(!CURRENT_TESTER) return;
+  const u = TESTER_INDEX[CURRENT_TESTER];
+  const label = u ? (u.tester_name+' ('+u.tag+')') : 'this tester';
+  if(!confirm('Delete all results for '+label+'?\\n\\nRemoves only this tester from the dashboard and leaderboard. Use this to clear a duplicate or a device-hopper. Cannot be undone.')) return;
+  try{
+    const r = await fetch('/admin/reset-tester?token='+encodeURIComponent(TOKEN)+'&key='+encodeURIComponent(CURRENT_TESTER), {method:'POST'});
+    if(r.status===401){ alert('Wrong token — delete not allowed.'); return; }
+    if(!r.ok){ alert('Delete failed: server error '+r.status); return; }
+    const j = await r.json();
+    closeDrawer();
+    poll();
+    alert('Removed '+(j.cleared??0)+' result(s) for '+label+'.');
+  }catch(e){ alert('Delete failed — could not reach the server.'); }
+});
+
 function closeDrawer(){ q('#drawerScrim').classList.remove('on'); }
 
 async function openTester(key){
+  CURRENT_TESTER = key;
   const u = TESTER_INDEX[key];
   q('#dName').textContent = u ? u.tester_name : 'Tester';
   q('#dSub').textContent = u ? (u.tag+' · '+u.role+' · '+u.device+(u.wave?' · Wave '+u.wave:'')) : '';

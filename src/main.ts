@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import {
-  initSchema, upsertResult, allResults, summary, clearAllResults, testerResults, IncomingResult,
+  initSchema, upsertResult, allResults, summary, clearAllResults, clearTester, testerResults, IncomingResult,
 } from './db';
 import { DASHBOARD_HTML } from './dashboard';
 
@@ -94,6 +94,15 @@ class AppController {
   async reset(@Query('token') token: string) {
     checkToken(token);
     const removed = await clearAllResults();
+    return { ok: true, cleared: removed };
+  }
+
+  // ---- delete one tester's results (leaderboard cleanup for dupes/device-hoppers) ----
+  @Post('/admin/reset-tester')
+  async resetTester(@Query('token') token: string, @Query('key') key: string) {
+    checkToken(token);
+    if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
+    const removed = await clearTester(key);
     return { ok: true, cleared: removed };
   }
 
