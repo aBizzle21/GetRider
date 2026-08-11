@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import {
-  initSchema, upsertResult, allResults, summary, clearAllResults, clearTester, testerResults, IncomingResult,
+  initSchema, upsertResult, allResults, summary, clearAllResults, clearTester, testerResults,
+  insertIssue, allIssues, testerIssues, IncomingResult, IncomingIssue,
 } from './db';
 import { DASHBOARD_HTML } from './dashboard';
 
@@ -81,12 +82,26 @@ class AppController {
     return await summary();
   }
 
+  // ---- general feedback ingest (aesthetic/UX/suggestions, separate from pass/fail) ----
+  @Post('/issue')
+  async ingestIssue(@Body() body: IncomingIssue, @Query('token') qToken: string, @Req() req: Request) {
+    const token = qToken || (req.headers['x-ingest-token'] as string);
+    checkToken(token);
+    if (!body || !body.issue_id || !body.tester_key || !body.category) {
+      throw new HttpException('missing fields', HttpStatus.BAD_REQUEST);
+    }
+    await insertIssue(body);
+    return { ok: true };
+  }
+
   // ---- one tester's full log (dashboard drill-down) ----
   @Get('/api/tester')
   async apiTester(@Query('token') token: string, @Query('key') key: string) {
     checkToken(token);
     if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
-    return await testerResults(key);
+    const results = await testerResults(key);
+    const issues = await testerIssues(key);
+    return { results, issues };
   }
 
   // ---- reset: wipe every result (server only; testers' local copies untouched) ----
@@ -111,21 +126,34 @@ class AppController {
   async exportCsv(@Query('token') token: string, @Res() res: Response) {
     checkToken(token);
     const rows = await allResults();
+    const issues = await allIssues();
+    let csv = toCsv(rows);
+    if (issues.length) {
+      const icols = ['tester_name', 'tag', 'device', 'role', 'wave', 'category', 'note', 'logged_at', 'received_at'];
+      const cell = (v: any) => {
+        const s = v === null || v === undefined ? '' : String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      csv += '\r\n\r\nGENERAL ISSUES\r\n' + [icols.join(',')]
+        .concat(issues.map((r: any) => icols.map((c) => cell(r[c])).join(','))).join('\r\n');
+    }
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="breakit_all_${stamp}.csv"`);
-    res.send(toCsv(rows));
+    res.send(csv);
   }
 
   @Get('/export.json')
   async exportJson(@Query('token') token: string, @Res() res: Response) {
     checkToken(token);
     const rows = await allResults();
+    const issues = await allIssues();
     const payload = {
       schema: 'getrider.breakit.consolidated.v1',
       exported_at: new Date().toISOString(),
       count: rows.length,
       results: rows,
+      issues,
     };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');

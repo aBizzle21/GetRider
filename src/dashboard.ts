@@ -119,7 +119,18 @@ tr:last-child td{border-bottom:none}
 .dr-pass b{color:var(--green)}
 .dr-note{font-size:12.5px;color:#C4CEC5;background:var(--panel2);border-radius:7px;padding:8px 10px;line-height:1.45;margin-top:5px}
 .dr-rec{font-family:var(--mono);font-size:9.5px;color:var(--blue)}
-.groupbars{padding:6px 0}.gb{display:flex;align-items:center;gap:10px;padding:8px 18px}
+.dr-section{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:16px 22px 8px;position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line)}
+.dr-cat{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:5px;color:var(--blue);background:rgba(76,165,255,.14)}
+.groupbars{padding:6px 0}
+.issue-cats{display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.icat{font-family:var(--mono);font-size:11px;padding:6px 11px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);color:var(--paper);display:flex;align-items:center;gap:7px}
+.icat b{color:var(--blue);font-weight:700}
+.issue-item{padding:13px 18px;border-bottom:1px solid var(--line)}
+.issue-item:last-child{border-bottom:none}
+.issue-top{display:flex;align-items:center;gap:9px;margin-bottom:4px;flex-wrap:wrap}
+.issue-cat{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:5px;color:var(--blue);background:rgba(76,165,255,.14)}
+.issue-meta{font-family:var(--mono);font-size:11px;color:var(--mute)}
+.issue-note{font-size:13px;color:#C4CEC5;margin-top:4px;line-height:1.45}.gb{display:flex;align-items:center;gap:10px;padding:8px 18px}
 .gb .gname{flex:1;font-size:13px}
 .gb .gcount{font-family:var(--mono);font-size:11px;color:var(--mute)}
 .gb .gfail{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--red);min-width:30px;text-align:right}
@@ -165,6 +176,12 @@ tr:last-child td{border-bottom:none}
         <div class="groupbars" id="groupBars"></div>
       </div>
     </div>
+  </div>
+
+  <div class="card" id="issuesCard" style="margin-top:22px">
+    <h2>General issues <span class="n" id="issuesN">0</span></h2>
+    <div id="issueCats" class="issue-cats"></div>
+    <div id="issuesList"><div class="empty" style="padding:30px">No general issues yet — aesthetic notes, confusing flows, and suggestions land here, separate from pass/fail.</div></div>
   </div>
 </div>
 
@@ -293,6 +310,22 @@ function render(d){
     <div class="gb"><span class="gname">\${esc(g.group_name)}</span>
       <span class="gcount">\${g.logged} logged</span>
       <span class="gfail">\${g.fail? g.fail+' ✗':''}</span></div>\`).join('') || '<div class="empty" style="padding:24px">No data yet</div>';
+
+  // general issues panel
+  const issueCats = d.issueByCat||[];
+  const recentIssues = d.recentIssues||[];
+  q('#issuesN').textContent = d.issueCount||0;
+  q('#issueCats').innerHTML = issueCats.length
+    ? issueCats.map(c=>\`<span class="icat">\${esc(c.category)} <b>\${c.n}</b></span>\`).join('')
+    : '';
+  q('#issueCats').style.display = issueCats.length ? 'flex' : 'none';
+  q('#issuesList').innerHTML = recentIssues.length
+    ? recentIssues.map(i=>\`<div class="issue-item">
+        <div class="issue-top"><span class="issue-cat">\${esc(i.category)}</span>
+          <span class="issue-meta">\${esc(i.tester_name)} · \${esc(i.tag)} · \${esc(i.device)} · \${fmtAgo(i.received_at)} ago</span></div>
+        \${i.note?\`<div class="issue-note">\${esc(i.note)}</div>\`:''}
+      </div>\`).join('')
+    : '<div class="empty" style="padding:30px">No general issues yet — aesthetic notes, confusing flows, and suggestions land here, separate from pass/fail.</div>';
 }
 
 poll();
@@ -336,34 +369,45 @@ async function openTester(key){
   const u = TESTER_INDEX[key];
   q('#dName').textContent = u ? u.tester_name : 'Tester';
   q('#dSub').textContent = u ? (u.tag+' · '+u.role+' · '+u.device+(u.wave?' · Wave '+u.wave:'')) : '';
-  q('#dScore').innerHTML = u ? \`<span><b>\${u.score||0}</b> score</span><span>\${u.logged} logged</span><span style="color:var(--green)">\${u.pass} pass</span><span style="color:var(--red)">\${u.fail} fail</span><span style="color:var(--amber)">\${u.blocked} blocked</span>\` : '';
+  q('#dScore').innerHTML = u ? \`<span><b>\${u.score||0}</b> score</span><span>\${u.logged} logged</span><span style="color:var(--green)">\${u.pass} pass</span><span style="color:var(--red)">\${u.fail} fail</span><span style="color:var(--amber)">\${u.blocked} blocked</span>\${u.issues?\`<span style="color:var(--blue)">\${u.issues} issue\${u.issues===1?'':'s'}</span>\`:''}\` : '';
   q('#dBody').innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
   q('#drawerScrim').classList.add('on');
   try{
     const r = await fetch('/api/tester?token='+encodeURIComponent(TOKEN)+'&key='+encodeURIComponent(key));
     if(!r.ok){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">Couldn\\'t load this tester.</div>'; return; }
-    const rows = await r.json();
-    renderTesterBody(rows);
+    const data = await r.json();
+    renderTesterBody(data.results||[], data.issues||[]);
   }catch(e){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">Couldn\\'t load this tester.</div>'; }
 }
 
-function renderTesterBody(rows){
-  if(!rows || !rows.length){ q('#dBody').innerHTML='<div class="empty" style="padding:40px">No results logged yet.</div>'; return; }
-  q('#dBody').innerHTML = rows.map(r=>{
-    const v = r.verdict;
-    const vlabel = v==='fail' ? ('FAIL'+(r.severity?' · '+r.severity:'')) : v==='block' ? 'BLOCKED' : 'PASS';
-    return \`<div class="dr-item">
-      <div class="dr-top">
-        <span class="dr-vtag \${v}">\${vlabel}</span>
-        <span class="dr-id">\${esc(r.test_id)}</span>
-        \${r.recording?'<span class="dr-rec">● REC</span>':''}
-        <span class="dr-grp">\${esc(r.group_name)}</span>
-      </div>
-      <div class="dr-test">\${esc(r.test_text)}</div>
-      \${r.pass_condition?\`<div class="dr-pass"><b>Pass if:</b> \${esc(r.pass_condition)}</div>\`:''}
-      \${r.notes?\`<div class="dr-note">\${esc(r.notes)}</div>\`:''}
-    </div>\`;
-  }).join('');
+function renderTesterBody(rows, issues){
+  let html='';
+  if(issues && issues.length){
+    html += '<div class="dr-section">General issues ('+issues.length+')</div>';
+    html += issues.map(i=>\`<div class="dr-item">
+      <div class="dr-top"><span class="dr-cat">\${esc(i.category)}</span><span class="dr-grp">\${fmtAgo(i.received_at)} ago</span></div>
+      \${i.note?\`<div class="dr-note">\${esc(i.note)}</div>\`:''}
+    </div>\`).join('');
+  }
+  if(rows && rows.length){
+    html += '<div class="dr-section">Test results ('+rows.length+')</div>';
+    html += rows.map(r=>{
+      const v = r.verdict;
+      const vlabel = v==='fail' ? ('FAIL'+(r.severity?' · '+r.severity:'')) : v==='block' ? 'BLOCKED' : 'PASS';
+      return \`<div class="dr-item">
+        <div class="dr-top">
+          <span class="dr-vtag \${v}">\${vlabel}</span>
+          <span class="dr-id">\${esc(r.test_id)}</span>
+          \${r.recording?'<span class="dr-rec">● REC</span>':''}
+          <span class="dr-grp">\${esc(r.group_name)}</span>
+        </div>
+        <div class="dr-test">\${esc(r.test_text)}</div>
+        \${r.pass_condition?\`<div class="dr-pass"><b>Pass if:</b> \${esc(r.pass_condition)}</div>\`:''}
+        \${r.notes?\`<div class="dr-note">\${esc(r.notes)}</div>\`:''}
+      </div>\`;
+    }).join('');
+  }
+  q('#dBody').innerHTML = html || '<div class="empty" style="padding:40px">Nothing logged yet.</div>';
 }
 </script>
 </body>
