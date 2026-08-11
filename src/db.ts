@@ -111,7 +111,10 @@ export async function allResults() {
     `SELECT tester_name, tag, device, role, wave, group_name, test_id, test_text, pass_condition,
             verdict, severity, recording, notes, logged_at, received_at
        FROM results
-      ORDER BY tag, tester_name, group_name, test_id`,
+      ORDER BY
+        CASE WHEN wave IS NULL OR wave='' THEN 1 ELSE 0 END,
+        wave,
+        tag, tester_name, group_name, test_id`,
   );
   return rows;
 }

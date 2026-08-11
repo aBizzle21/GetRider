@@ -29,9 +29,31 @@ function toCsv(rows: any[]): string {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [cols.join(',')]
-    .concat(rows.map((r) => cols.map((c) => cell(r[c])).join(',')))
-    .join('\r\n');
+  const waveLabel = (w: any) => {
+    const s = (w === null || w === undefined || String(w).trim() === '') ? '' : String(w).trim();
+    return s ? `WAVE ${s}` : 'WAVE UNSPECIFIED';
+  };
+  const header = cols.join(',');
+  const out: string[] = [];
+  let currentWave: string | null = null;
+  let waveCount = 0;
+  // rows arrive pre-sorted by wave (see allResults); section them with a banner + header row per wave
+  for (const r of rows) {
+    const wl = waveLabel(r.wave);
+    if (wl !== currentWave) {
+      currentWave = wl;
+      waveCount += 1;
+      if (out.length) out.push(''); // blank line between wave blocks
+      out.push(`=== ${wl} ===`);
+      out.push(header);
+    }
+    out.push(cols.map((c) => cell(r[c])).join(','));
+  }
+  // If only one wave (or none), fall back to a plain single header at the top for tidiness.
+  if (waveCount <= 1) {
+    return [header].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(','))).join('\r\n');
+  }
+  return out.join('\r\n');
 }
 
 @Controller()
@@ -148,11 +170,27 @@ class AppController {
     checkToken(token);
     const rows = await allResults();
     const issues = await allIssues();
+    // group results by wave for readability, keep the flat list too for machine readers
+    const waveKey = (w: any) => {
+      const s = (w === null || w === undefined || String(w).trim() === '') ? '' : String(w).trim();
+      return s || 'unspecified';
+    };
+    const byWave: Record<string, any[]> = {};
+    for (const r of rows) {
+      const k = waveKey(r.wave);
+      (byWave[k] = byWave[k] || []).push(r);
+    }
+    const waves = Object.keys(byWave).sort().map((w) => ({
+      wave: w,
+      count: byWave[w].length,
+      results: byWave[w],
+    }));
     const payload = {
-      schema: 'getrider.breakit.consolidated.v1',
+      schema: 'getrider.breakit.consolidated.v2',
       exported_at: new Date().toISOString(),
       count: rows.length,
-      results: rows,
+      waves,          // results grouped by wave
+      results: rows,  // full flat list (all waves), for machine readers
       issues,
     };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
