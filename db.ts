@@ -40,6 +40,26 @@ export async function initSchema() {
   // Self-heal: if the table pre-dates the pass_condition column, add it.
   // Harmless on fresh databases where CREATE TABLE already included it.
   await pool.query(`ALTER TABLE results ADD COLUMN IF NOT EXISTS pass_condition TEXT`);
+
+  // General feedback (aesthetic / UX / suggestions) — separate from pass/fail results.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS issues (
+      id            BIGSERIAL PRIMARY KEY,
+      issue_id      TEXT UNIQUE,
+      tester_key    TEXT NOT NULL,
+      tester_name   TEXT NOT NULL,
+      tag           TEXT NOT NULL,
+      device        TEXT NOT NULL,
+      role          TEXT NOT NULL,
+      wave          TEXT,
+      category      TEXT NOT NULL,
+      note          TEXT,
+      logged_at     TIMESTAMPTZ,
+      received_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_issues_testerkey ON issues (tester_key);
+    CREATE INDEX IF NOT EXISTS idx_issues_category ON issues (category);
+  `);
 }
 
 export interface IncomingResult {
@@ -91,13 +111,68 @@ export async function allResults() {
     `SELECT tester_name, tag, device, role, wave, group_name, test_id, test_text, pass_condition,
             verdict, severity, recording, notes, logged_at, received_at
        FROM results
-      ORDER BY tag, tester_name, group_name, test_id`,
+      ORDER BY
+        CASE WHEN wave IS NULL OR wave='' THEN 1 ELSE 0 END,
+        wave,
+        tag, tester_name, group_name, test_id`,
   );
   return rows;
 }
 
 export async function clearAllResults(): Promise<number> {
   const { rowCount } = await pool.query('DELETE FROM results');
+  return rowCount || 0;
+}
+
+export async function clearTester(testerKey: string): Promise<number> {
+  const { rowCount } = await pool.query('DELETE FROM results WHERE tester_key = $1', [testerKey]);
+  const r2 = await pool.query('DELETE FROM issues WHERE tester_key = $1', [testerKey]);
+  return (rowCount || 0) + (r2.rowCount || 0);
+}
+
+export interface IncomingIssue {
+  issue_id: string;
+  tester_key: string;
+  tester: string;
+  tag: string;
+  device: string;
+  role: string;
+  wave?: string;
+  category: string;
+  note?: string;
+  logged_at?: string;
+}
+
+export async function insertIssue(i: IncomingIssue) {
+  await pool.query(
+    `INSERT INTO issues
+       (issue_id, tester_key, tester_name, tag, device, role, wave, category, note, logged_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (issue_id) DO NOTHING`,
+    [i.issue_id, i.tester_key, i.tester, i.tag, i.device, i.role, i.wave || null,
+     i.category, i.note || null, i.logged_at ? new Date(i.logged_at) : null],
+  );
+}
+
+export async function allIssues() {
+  const { rows } = await pool.query(
+    `SELECT tester_name, tag, device, role, wave, category, note, logged_at, received_at
+       FROM issues ORDER BY received_at DESC`,
+  );
+  return rows;
+}
+
+export async function testerIssues(testerKey: string) {
+  const { rows } = await pool.query(
+    `SELECT category, note, logged_at, received_at
+       FROM issues WHERE tester_key = $1 ORDER BY received_at DESC`,
+    [testerKey],
+  );
+  return rows;
+}
+
+export async function clearAllIssues(): Promise<number> {
+  const { rowCount } = await pool.query('DELETE FROM issues');
   return rowCount || 0;
 }
 
@@ -157,11 +232,30 @@ export async function summary() {
             COUNT(*) FILTER (WHERE verdict='fail')::int AS fail
        FROM results GROUP BY group_name ORDER BY fail DESC, group_name`,
   );
+  const issueByCat = await pool.query(
+    `SELECT category, COUNT(*)::int AS n FROM issues GROUP BY category ORDER BY n DESC`,
+  );
+  const recentIssues = await pool.query(
+    `SELECT tester_name, tag, device, category, note, received_at
+       FROM issues ORDER BY received_at DESC LIMIT 100`,
+  );
+  const issueCount = await pool.query(`SELECT COUNT(*)::int AS n FROM issues`);
+  // per-tester issue counts, to fold into byTester rows
+  const issuePerTester = await pool.query(
+    `SELECT tester_key, COUNT(*)::int AS issues FROM issues GROUP BY tester_key`,
+  );
+  const issueMap = {};
+  issuePerTester.rows.forEach((r) => { issueMap[r.tester_key] = r.issues; });
+  const byTesterWithIssues = byTester.rows.map((t) => ({ ...t, issues: issueMap[t.tester_key] || 0 }));
+
   return {
     totals: totals.rows,
     bySeverity: bySeverity.rows,
-    byTester: byTester.rows,
+    byTester: byTesterWithIssues,
     failures: failures.rows,
     byGroup: byGroup.rows,
+    issueByCat: issueByCat.rows,
+    recentIssues: recentIssues.rows,
+    issueCount: issueCount.rows[0] ? issueCount.rows[0].n : 0,
   };
 }
