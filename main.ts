@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import {
-  initSchema, upsertResult, allResults, summary, clearAllResults, testerResults, IncomingResult,
+  initSchema, upsertResult, allResults, summary, clearAllResults, clearTester, testerResults,
+  insertIssue, allIssues, testerIssues, IncomingResult, IncomingIssue,
 } from './db';
 import { DASHBOARD_HTML } from './dashboard';
 
@@ -28,9 +29,31 @@ function toCsv(rows: any[]): string {
     const s = v === null || v === undefined ? '' : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [cols.join(',')]
-    .concat(rows.map((r) => cols.map((c) => cell(r[c])).join(',')))
-    .join('\r\n');
+  const waveLabel = (w: any) => {
+    const s = (w === null || w === undefined || String(w).trim() === '') ? '' : String(w).trim();
+    return s ? `WAVE ${s}` : 'WAVE UNSPECIFIED';
+  };
+  const header = cols.join(',');
+  const out: string[] = [];
+  let currentWave: string | null = null;
+  let waveCount = 0;
+  // rows arrive pre-sorted by wave (see allResults); section them with a banner + header row per wave
+  for (const r of rows) {
+    const wl = waveLabel(r.wave);
+    if (wl !== currentWave) {
+      currentWave = wl;
+      waveCount += 1;
+      if (out.length) out.push(''); // blank line between wave blocks
+      out.push(`=== ${wl} ===`);
+      out.push(header);
+    }
+    out.push(cols.map((c) => cell(r[c])).join(','));
+  }
+  // If only one wave (or none), fall back to a plain single header at the top for tidiness.
+  if (waveCount <= 1) {
+    return [header].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(','))).join('\r\n');
+  }
+  return out.join('\r\n');
 }
 
 @Controller()
@@ -81,12 +104,26 @@ class AppController {
     return await summary();
   }
 
+  // ---- general feedback ingest (aesthetic/UX/suggestions, separate from pass/fail) ----
+  @Post('/issue')
+  async ingestIssue(@Body() body: IncomingIssue, @Query('token') qToken: string, @Req() req: Request) {
+    const token = qToken || (req.headers['x-ingest-token'] as string);
+    checkToken(token);
+    if (!body || !body.issue_id || !body.tester_key || !body.category) {
+      throw new HttpException('missing fields', HttpStatus.BAD_REQUEST);
+    }
+    await insertIssue(body);
+    return { ok: true };
+  }
+
   // ---- one tester's full log (dashboard drill-down) ----
   @Get('/api/tester')
   async apiTester(@Query('token') token: string, @Query('key') key: string) {
     checkToken(token);
     if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
-    return await testerResults(key);
+    const results = await testerResults(key);
+    const issues = await testerIssues(key);
+    return { results, issues };
   }
 
   // ---- reset: wipe every result (server only; testers' local copies untouched) ----
@@ -97,26 +134,64 @@ class AppController {
     return { ok: true, cleared: removed };
   }
 
+  // ---- delete one tester's results (leaderboard cleanup for dupes/device-hoppers) ----
+  @Post('/admin/reset-tester')
+  async resetTester(@Query('token') token: string, @Query('key') key: string) {
+    checkToken(token);
+    if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
+    const removed = await clearTester(key);
+    return { ok: true, cleared: removed };
+  }
+
   // ---- exports for the India team ----
   @Get('/export.csv')
   async exportCsv(@Query('token') token: string, @Res() res: Response) {
     checkToken(token);
     const rows = await allResults();
+    const issues = await allIssues();
+    let csv = toCsv(rows);
+    if (issues.length) {
+      const icols = ['tester_name', 'tag', 'device', 'role', 'wave', 'category', 'note', 'logged_at', 'received_at'];
+      const cell = (v: any) => {
+        const s = v === null || v === undefined ? '' : String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      csv += '\r\n\r\nGENERAL ISSUES\r\n' + [icols.join(',')]
+        .concat(issues.map((r: any) => icols.map((c) => cell(r[c])).join(','))).join('\r\n');
+    }
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="breakit_all_${stamp}.csv"`);
-    res.send(toCsv(rows));
+    res.send(csv);
   }
 
   @Get('/export.json')
   async exportJson(@Query('token') token: string, @Res() res: Response) {
     checkToken(token);
     const rows = await allResults();
+    const issues = await allIssues();
+    // group results by wave for readability, keep the flat list too for machine readers
+    const waveKey = (w: any) => {
+      const s = (w === null || w === undefined || String(w).trim() === '') ? '' : String(w).trim();
+      return s || 'unspecified';
+    };
+    const byWave: Record<string, any[]> = {};
+    for (const r of rows) {
+      const k = waveKey(r.wave);
+      (byWave[k] = byWave[k] || []).push(r);
+    }
+    const waves = Object.keys(byWave).sort().map((w) => ({
+      wave: w,
+      count: byWave[w].length,
+      results: byWave[w],
+    }));
     const payload = {
-      schema: 'getrider.breakit.consolidated.v1',
+      schema: 'getrider.breakit.consolidated.v2',
       exported_at: new Date().toISOString(),
       count: rows.length,
-      results: rows,
+      waves,          // results grouped by wave
+      results: rows,  // full flat list (all waves), for machine readers
+      issues,
     };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
