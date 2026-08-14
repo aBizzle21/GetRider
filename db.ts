@@ -162,11 +162,25 @@ export async function allIssues() {
   return rows;
 }
 
-export async function testerIssues(testerKey: string) {
+export async function testerIssues(
+  testerKey: string,
+  filter?: { wave?: string; device?: string; role?: string },
+) {
+  const clauses = ['tester_key = $1'];
+  const params: any[] = [testerKey];
+  if (filter?.wave !== undefined && filter.wave !== '') {
+    params.push(filter.wave); clauses.push(`COALESCE(wave,'') = $${params.length}`);
+  }
+  if (filter?.device !== undefined && filter.device !== '') {
+    params.push(filter.device); clauses.push(`COALESCE(device,'') = $${params.length}`);
+  }
+  if (filter?.role !== undefined && filter.role !== '') {
+    params.push(filter.role); clauses.push(`COALESCE(role,'') = $${params.length}`);
+  }
   const { rows } = await pool.query(
     `SELECT category, note, logged_at, received_at
-       FROM issues WHERE tester_key = $1 ORDER BY received_at DESC`,
-    [testerKey],
+       FROM issues WHERE ${clauses.join(' AND ')} ORDER BY received_at DESC`,
+    params,
   );
   return rows;
 }
@@ -176,17 +190,34 @@ export async function clearAllIssues(): Promise<number> {
   return rowCount || 0;
 }
 
-export async function testerResults(testerKey: string) {
+export async function testerResults(
+  testerKey: string,
+  filter?: { wave?: string; device?: string; role?: string },
+) {
+  // Base: all rows for this tester_key. Optional wave/device/role narrows to the
+  // exact leaderboard row the user clicked (the leaderboard groups by those columns,
+  // so one tester_key can map to several rows — e.g. Wave 1 and Wave 2).
+  const clauses = ['tester_key = $1'];
+  const params: any[] = [testerKey];
+  if (filter?.wave !== undefined && filter.wave !== '') {
+    params.push(filter.wave); clauses.push(`COALESCE(wave,'') = $${params.length}`);
+  }
+  if (filter?.device !== undefined && filter.device !== '') {
+    params.push(filter.device); clauses.push(`COALESCE(device,'') = $${params.length}`);
+  }
+  if (filter?.role !== undefined && filter.role !== '') {
+    params.push(filter.role); clauses.push(`COALESCE(role,'') = $${params.length}`);
+  }
   const { rows } = await pool.query(
     `SELECT group_name, test_id, test_text, pass_condition, verdict, severity,
             recording, notes, logged_at, received_at
        FROM results
-      WHERE tester_key = $1
+      WHERE ${clauses.join(' AND ')}
       ORDER BY
         CASE verdict WHEN 'fail' THEN 1 WHEN 'block' THEN 2 WHEN 'pass' THEN 3 ELSE 4 END,
         CASE severity WHEN 'S1' THEN 1 WHEN 'S2' THEN 2 WHEN 'S3' THEN 3 WHEN 'S4' THEN 4 ELSE 5 END,
         received_at DESC`,
-    [testerKey],
+    params,
   );
   return rows;
 }

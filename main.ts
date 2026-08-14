@@ -118,11 +118,18 @@ class AppController {
 
   // ---- one tester's full log (dashboard drill-down) ----
   @Get('/api/tester')
-  async apiTester(@Query('token') token: string, @Query('key') key: string) {
+  async apiTester(
+    @Query('token') token: string,
+    @Query('key') key: string,
+    @Query('wave') wave?: string,
+    @Query('device') device?: string,
+    @Query('role') role?: string,
+  ) {
     checkToken(token);
     if (!key) throw new HttpException('missing key', HttpStatus.BAD_REQUEST);
-    const results = await testerResults(key);
-    const issues = await testerIssues(key);
+    const filter = { wave, device, role };
+    const results = await testerResults(key, filter);
+    const issues = await testerIssues(key, filter);
     return { results, issues };
   }
 
